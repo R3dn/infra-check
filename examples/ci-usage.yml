@@ -1,0 +1,29 @@
+# Example: use infra-check as a step in any workflow
+
+name: Deploy then verify
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Infrastructure health check
+        uses: R3dn/infra-check@v1
+        with:
+          targets: example.com
+          port: 443
+          fail-on: error
+          timeout: 10
+
+      # Multiple targets and a custom port:
+      # - uses: R3dn/infra-check@v1
+      #   with:
+      #     targets: app.example.com api.example.com
+      #     port: 8443
+      #     fail-on: warn
+
+      # Or run the CLI directly without the composite action:
+      # - run: pip install infra-check && infra-check example.com --json

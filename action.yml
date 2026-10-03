@@ -1,0 +1,53 @@
+name: "Infrastructure Health Check"
+description: >-
+  Check infrastructure health for one or more targets: DNS, TCP, TLS, HTTP,
+  certificate expiry, latency and redirect. Fails the job when unhealthy.
+inputs:
+  targets:
+    description: "Space-separated domains or IPs to check."
+    required: true
+  port:
+    description: "TCP port to check."
+    required: false
+    default: "443"
+  fail-on:
+    description: "Exit-code policy: error (non-zero on fail or warn), warn, never."
+    required: false
+    default: "error"
+  timeout:
+    description: "Per-check timeout in seconds."
+    required: false
+    default: "10"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - name: Install infra-check
+      shell: bash
+      run: pip install infra-check
+    - name: Run health checks
+      shell: bash
+      env:
+        TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+        set +e
+        infra-check $TARGETS \
+          --port "${{ inputs.port }}" \
+          --fail-on "${{ inputs.fail-on }}" \
+          --timeout "${{ inputs.timeout }}" \
+          --json > infra-check-report.json
+        status=$?
+        set -e
+        {
+          echo "# Infrastructure Health Report"
+          echo
+          infra-check $TARGETS \
+            --port "${{ inputs.port }}" \
+            --fail-on never \
+            --timeout "${{ inputs.timeout }}" || true
+        } >> "$GITHUB_STEP_SUMMARY"
+        echo "report=infra-check-report.json" >> "$GITHUB_OUTPUT"
+        exit $status
