@@ -3,8 +3,8 @@
 **One command, full infrastructure health: DNS → TCP → TLS → HTTP → certificate → latency → redirect.**
 
 [![CI](https://github.com/R3dn/infra-check/actions/workflows/ci.yml/badge.svg)](https://github.com/R3dn/infra-check/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/infra-check.svg)](https://pypi.org/project/infra-check/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/infra-check.svg)](https://pypi.org/project/infra-check/)
+[![PyPI version](https://img.shields.io/pypi/v/infra-health-check.svg)](https://pypi.org/project/infra-health-check/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/infra-health-check.svg)](https://pypi.org/project/infra-health-check/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-green.svg)](pyproject.toml)
 
@@ -29,7 +29,7 @@ TLS** وحالة HTTP وانتهاء الشهادة وزمن الاستجابة 
 اليدوي أو ضمن GitHub Actions.
 
 ```bash
-pip install infra-check
+pip install infra-health-check
 infra-check example.com
 ```
 
@@ -68,7 +68,7 @@ so CI can always tell "my pipeline is misconfigured" from "my site is down".
 **From PyPI:**
 
 ```bash
-pip install infra-check
+pip install infra-health-check
 ```
 
 **From source:**
@@ -205,7 +205,7 @@ exposed as the `report` output. See `examples/ci-usage.yml`.
 Or run it directly in any workflow:
 
 ```yaml
-- run: pip install infra-check && infra-check $TARGET --json
+- run: pip install infra-health-check && infra-check $TARGET --json
 ```
 
 ## Architecture

@@ -35,4 +35,4 @@ jobs:
       # - run: cat "${{ steps.health.outputs.report }}"
 
       # Or run the CLI directly without the composite action:
-      # - run: pip install infra-check && infra-check example.com --json
+      # - run: pip install infra-health-check && infra-check example.com --json
