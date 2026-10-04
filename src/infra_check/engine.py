@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import time
+import dataclasses
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -42,21 +43,20 @@ _SEVERITY = {Status.FAIL: 3, Status.WARN: 2, Status.PASS: 1, Status.SKIP: 0}
 
 @dataclass(frozen=True)
 class Thresholds:
-    """Configurable warning/failure limits."""
+    """Configurable warning/failure limits and per-run behaviour switches."""
 
     cert_warn_days: int = 30
     cert_fail_days: int = 7
     latency_warn_ms: float = 300.0
     latency_fail_ms: float = 1000.0
     timeout: float = 10.0
+    verify_tls: bool = True
 
     @staticmethod
-    def merge(base: Thresholds, **overrides: float | int | None) -> Thresholds:
+    def merge(base: Thresholds, **overrides: Any) -> Thresholds:
         """Return a copy of ``base`` with non-None overrides applied."""
-        values = {
-            k: v for k, v in overrides.items() if v is not None and hasattr(base, k)
-        }
-        return Thresholds(**{**base.__dict__, **values})  # type: ignore[arg-type]
+        clean = {k: v for k, v in overrides.items() if v is not None and hasattr(base, k)}
+        return dataclasses.replace(base, **clean)
 
 
 def classify_latency(ms: float, t: Thresholds) -> Status:
@@ -107,13 +107,9 @@ class TargetReport:
     target: str
     port: int
     checks: list[CheckResult] = field(default_factory=list)
-    started_at: float = field(default_factory=time.time)
 
     def add(self, result: CheckResult) -> None:
         self.checks.append(result)
-
-    def by_name(self, name: str) -> CheckResult | None:
-        return next((c for c in self.checks if c.name == name), None)
 
     @property
     def verdict(self) -> Verdict:
@@ -150,23 +146,22 @@ def aggregate_verdict(reports: list[TargetReport]) -> Verdict:
 
 
 def exit_code(reports: list[TargetReport], fail_on: str) -> int:
-    """Map aggregate result to a process exit code.
+    """Map the aggregate verdict to a process exit code.
 
-    ``fail_on``: ``"error"`` -> non-zero only on FAIL (DEGRADED exits 1),
-    ``"warn"`` -> non-zero on WARN as well, ``"never"`` -> always 0.
+    ``fail_on``: ``"error"`` (default) -> DEGRADED exits 1 alongside UNHEALTHY
+    exiting 2; ``"never"`` -> only UNHEALTHY exits non-zero (DEGRADED exits 0).
+    Health exit codes are a documented contract: 0/1/2.
     """
     verdict = aggregate_verdict(reports)
     if verdict is Verdict.UNHEALTHY:
         return EXIT_UNHEALTHY
     if verdict is Verdict.DEGRADED:
-        return EXIT_DEGRADED if fail_on in ("error", "warn") else EXIT_OK
+        return EXIT_OK if fail_on == "never" else EXIT_DEGRADED
     return EXIT_OK
 
 
 def build_envelope(reports: list[TargetReport]) -> dict[str, Any]:
     """Machine-readable JSON envelope for one or more targets."""
-    from datetime import datetime, timezone
-
     return {
         "tool": "infra-check",
         "version": __version__,

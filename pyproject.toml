@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "infra-check"
-version = "1.0.0"
+version = "0.1.0"
 description = "Infrastructure health checker CLI: DNS, TCP, TLS, HTTP, certificate and latency checks in one command"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Redn Alsidrah" }]
 keywords = ["healthcheck", "dns", "tls", "certificate", "latency", "devops", "sre", "cli"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
@@ -47,6 +47,8 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "build>=1.2",
+    "trustme>=1.1",
+    "mypy>=1.11",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -66,3 +68,15 @@ addopts = "-q"
 
 [tool.coverage.run]
 source = ["src/infra_check"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/infra_check"]
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+strict = false

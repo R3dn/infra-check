@@ -11,19 +11,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Infrastructure health check
-        uses: R3dn/infra-check@v1
+        uses: R3dn/infra-check@v0
         with:
           targets: example.com
           port: 443
           fail-on: error
           timeout: 10
 
-      # Multiple targets and a custom port:
-      # - uses: R3dn/infra-check@v1
+      # Multiple targets, custom TLS port and a pinned version:
+      # - uses: R3dn/infra-check@v0
       #   with:
       #     targets: app.example.com api.example.com
       #     port: 8443
-      #     fail-on: warn
+      #     scheme: https
+      #     version: 0.1.0
+      #     fail-on: error
+
+      # Consume the JSON report in a later step:
+      # - uses: R3dn/infra-check@v0
+      #   id: health
+      #   with:
+      #     targets: example.com
+      # - run: cat "${{ steps.health.outputs.report }}"
 
       # Or run the CLI directly without the composite action:
       # - run: pip install infra-check && infra-check example.com --json

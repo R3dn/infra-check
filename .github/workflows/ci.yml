@@ -16,6 +16,16 @@ jobs:
       - run: pip install ruff
       - run: ruff check .
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e . mypy
+      - run: python -m mypy
+
   test:
     strategy:
       fail-fast: false
@@ -28,10 +38,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e . pytest pytest-cov
+      - run: pip install -e . pytest pytest-cov trustme
       - run: python -m pytest --cov=infra_check --cov-report=term
       - name: Enforce coverage floor
-        run: pip install coverage && coverage report --fail-under=90
+        run: python -m coverage report --fail-under=90
 
   build:
     runs-on: ubuntu-latest
@@ -45,3 +55,27 @@ jobs:
         with:
           name: dist
           path: dist/
+
+  wheel-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install from wheel and run --help / --version
+        run: |
+          pip install dist/*.whl
+          infra-check --help
+          infra-check --version
+      - name: Usage errors exit 64
+        run: |
+          set +e
+          infra-check example.com --port 99999
+          code=$?
+          set -e
+          [ "$code" -eq 64 ] || { echo "expected exit 64, got $code"; exit 1; }

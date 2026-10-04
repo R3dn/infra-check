@@ -7,17 +7,31 @@ inputs:
     description: "Space-separated domains or IPs to check."
     required: true
   port:
-    description: "TCP port to check."
+    description: "TCP port to check (1-65535)."
     required: false
     default: "443"
+  scheme:
+    description: "Force request scheme: http or https (default: inferred from port)."
+    required: false
+    default: ""
   fail-on:
-    description: "Exit-code policy: error (non-zero on fail or warn), warn, never."
+    description: >-
+      Exit-code policy: 'error' (default) exits 1 on WARN and 2 on FAIL;
+      'never' exits non-zero only on FAIL.
     required: false
     default: "error"
   timeout:
     description: "Per-check timeout in seconds."
     required: false
     default: "10"
+  version:
+    description: "infra-check version to install from PyPI (default: latest release)."
+    required: false
+    default: ""
+outputs:
+  report:
+    description: "Path to the JSON health report written by this step."
+    value: ${{ steps.run.outputs.report }}
 runs:
   using: "composite"
   steps:
@@ -26,28 +40,26 @@ runs:
         python-version: "3.13"
     - name: Install infra-check
       shell: bash
-      run: pip install infra-check
+      run: pip install "${{ inputs.version != '' && format('infra-check=={0}', inputs.version) || 'infra-check' }}"
     - name: Run health checks
+      id: run
       shell: bash
       env:
         TARGETS: ${{ inputs.targets }}
       run: |
         set -euo pipefail
+        args=(--port "${{ inputs.port }}" --fail-on "${{ inputs.fail-on }}" --timeout "${{ inputs.timeout }}")
+        if [ -n "${{ inputs.scheme }}" ]; then
+          args+=(--scheme "${{ inputs.scheme }}")
+        fi
         set +e
-        infra-check $TARGETS \
-          --port "${{ inputs.port }}" \
-          --fail-on "${{ inputs.fail-on }}" \
-          --timeout "${{ inputs.timeout }}" \
-          --json > infra-check-report.json
+        infra-check $TARGETS "${args[@]}" --json > infra-check-report.json
         status=$?
         set -e
         {
           echo "# Infrastructure Health Report"
           echo
-          infra-check $TARGETS \
-            --port "${{ inputs.port }}" \
-            --fail-on never \
-            --timeout "${{ inputs.timeout }}" || true
+          infra-check $TARGETS "${args[@]}" --fail-on never || true
         } >> "$GITHUB_STEP_SUMMARY"
         echo "report=infra-check-report.json" >> "$GITHUB_OUTPUT"
         exit $status

@@ -57,6 +57,15 @@ class TestClassification:
         assert t.latency_fail_ms == 2000.0
         assert t.cert_fail_days == 7  # unchanged
 
+    def test_merge_none_overrides_ignored(self):
+        t = Thresholds.merge(Thresholds(), cert_warn_days=None, verify_tls=None)
+        assert t.cert_warn_days == 30
+        assert t.verify_tls is True
+
+    def test_merge_verify_tls_false(self):
+        t = Thresholds.merge(Thresholds(), verify_tls=False)
+        assert t.verify_tls is False
+
     def test_redirect_to_https_pass(self):
         assert classify_redirect(followed_https=True, final_https=True) is Status.PASS
 

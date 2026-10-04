@@ -22,6 +22,11 @@ from infra_check.engine import (
 )
 from infra_check.registry import normalize_selection, run_checks
 
+#: sysexits(3)-style codes for non-health outcomes. Health codes 0/1/2
+#: are a documented contract (CONTRIBUTING.md) and remain unchanged.
+EXIT_USAGE = 64
+EXIT_INTERNAL = 70
+
 _VERDICT_STYLE = {
     Verdict.HEALTHY: "bold green",
     Verdict.DEGRADED: "bold yellow",
@@ -39,6 +44,9 @@ _ASCII_SYMBOLS = {
     Status.FAIL: "FAIL",
     Status.SKIP: "SKIP",
 }
+
+_STDOUT = Console()
+_STDERR = Console(stderr=True)
 
 
 def _status_symbols(console: Console) -> dict[Status, str]:
@@ -98,21 +106,40 @@ def _render_summary(reports: list[TargetReport], console: Console) -> None:
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.argument("targets", nargs=-1, required=True)
-@click.option("--port", default=443, show_default=True, type=int, help="TCP port to check.")
+@click.option(
+    "--port",
+    default=443,
+    show_default=True,
+    type=click.IntRange(1, 65535),
+    help="TCP port to check.",
+)
 @click.option(
     "--checks",
     default=None,
-    callback=lambda ctx, p, v: v,
     help="Comma-separated subset, e.g. dns,tcp,tls,http.",
+)
+@click.option(
+    "--scheme",
+    type=click.Choice(["http", "https"]),
+    default=None,
+    help="Force the HTTP request scheme (default: inferred from port).",
 )
 @click.option("--timeout", default=None, type=float, help="Per-check timeout in seconds.")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 @click.option(
     "--fail-on",
-    type=click.Choice(["error", "warn", "never"]),
+    type=click.Choice(["error", "never"]),
     default="error",
     show_default=True,
-    help="Exit-code policy for warnings.",
+    help=(
+        "Exit-code policy for warnings: 'error' exits 1 on WARN, "
+        "'never' only exits non-zero on FAIL."
+    ),
+)
+@click.option(
+    "--no-verify-tls",
+    is_flag=True,
+    help="Skip TLS certificate verification (diagnostic only; certificate check reports SKIP).",
 )
 @click.option(
     "--cert-warn-days", default=None, type=int, help="Warn below N days of cert validity."
@@ -127,13 +154,15 @@ def _render_summary(reports: list[TargetReport], console: Console) -> None:
     "--latency-fail-ms", default=None, type=float, help="Fail above N ms latency."
 )
 @click.version_option(__version__, prog_name="infra-check")
-def main(
+def check_command(
     targets: tuple[str, ...],
     port: int,
     checks: str | None,
+    scheme: str | None,
     timeout: float | None,
     as_json: bool,
     fail_on: str,
+    no_verify_tls: bool,
     cert_warn_days: int | None,
     cert_fail_days: int | None,
     latency_warn_ms: float | None,
@@ -147,14 +176,13 @@ def main(
         infra-check example.com
         infra-check example.com --port 443 --json
         infra-check --checks dns,http example.com
-        infra-check a.com b.com --fail-on warn
+        infra-check a.com b.com --fail-on never
     """
-    console = Console()
     try:
         selected = normalize_selection(checks.split(",") if checks else None)
     except ValueError as exc:
-        console.print(f"[red]error:[/red] {exc}")
-        sys.exit(2)
+        _STDERR.print(f"[red]error:[/red] {exc}")
+        sys.exit(EXIT_USAGE)
 
     thresholds = Thresholds.merge(
         Thresholds(),
@@ -163,21 +191,45 @@ def main(
         latency_warn_ms=latency_warn_ms,
         latency_fail_ms=latency_fail_ms,
         timeout=timeout,
+        verify_tls=False if no_verify_tls else None,
     )
 
-    reports = [run_checks(target, port, thresholds, selected) for target in targets]
+    if no_verify_tls:
+        _STDERR.print(
+            "[yellow]warning:[/yellow] TLS certificate verification is DISABLED (--no-verify-tls); "
+            "the connection is still encrypted but the server identity is unverified."
+        )
+
+    try:
+        reports = [
+            run_checks(target, port, thresholds, selected, scheme=scheme) for target in targets
+        ]
+    except Exception as exc:  # noqa: BLE001 - surface internal errors distinctly
+        _STDERR.print(f"[red]internal error:[/red] {type(exc).__name__}: {exc}")
+        sys.exit(EXIT_INTERNAL)
 
     if as_json:
         click.echo(json.dumps(build_envelope(reports), indent=2))
     else:
         for report in reports:
-            _render_report(report, console)
-        _render_summary(reports, console)
+            _render_report(report, _STDOUT)
+        _render_summary(reports, _STDOUT)
 
     code = exit_code(reports, fail_on)
     if code == EXIT_OK:
         sys.exit(0)
     sys.exit(code)
+
+
+def main() -> None:
+    """Console entry point: usage errors exit 64, distinct from health codes."""
+    try:
+        check_command(standalone_mode=False)
+    except click.exceptions.UsageError as exc:
+        exc.show()
+        sys.exit(EXIT_USAGE)
+    except click.exceptions.Exit as exc:
+        sys.exit(exc.exit_code)
 
 
 if __name__ == "__main__":

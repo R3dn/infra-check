@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import ssl
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -30,33 +31,55 @@ def mock_dns_failure(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _fail)
 
 
-def _make_tls_handshake(days_left=90):
+@pytest.fixture
+def mock_dns_timeout(monkeypatch):
+    """Resolution that blocks past the timeout — exercises the bounded lookup."""
+
+    def _hang(host, port, *args, **kwargs):
+        time.sleep(5)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", _hang)
+
+
+def _make_tls_info(days_left=90, protocol="TLSv1.3", cipher="TLS_AES_256_GCM_SHA384"):
     from infra_check.checks.tls import TlsInfo
 
-    def _handshake(target, port, thresholds):
-        expires = datetime.now(timezone.utc) + timedelta(days=days_left)
-        return TlsInfo(
-            protocol="TLSv1.3",
-            cipher="TLS_AES_256_GCM_SHA384",
-            not_after=expires.strftime("%b %d %H:%M:%S %Y GMT"),
-            issuer_org="Fake CA Inc",
-        )
+    now = datetime.now(timezone.utc)
+    return TlsInfo(
+        protocol=protocol,
+        cipher=cipher,
+        not_before=(now - timedelta(days=90)).strftime("%b %d %H:%M:%S %Y GMT"),
+        not_after=(now + timedelta(days=days_left)).strftime("%b %d %H:%M:%S %Y GMT"),
+        subject_cn="example.com",
+        issuer_org="Fake CA Inc",
+        sans=["example.com", "www.example.com"],
+    )
 
-    return _handshake
+
+def _patch_handshake(monkeypatch, days_left=90):
+    """Patch tls._handshake to return a TlsInfo with the given validity."""
+    from infra_check.checks import tls as tls_module
+
+    info = _make_tls_info(days_left=days_left)
+    calls = {"n": 0}
+
+    def _handshake(target, port, thresholds):
+        calls["n"] += 1
+        return info
+
+    monkeypatch.setattr(tls_module, "_handshake", _handshake)
+    return calls
 
 
 @pytest.fixture
 def mock_tls_ok(monkeypatch):
-    monkeypatch.setattr(
-        "infra_check.checks.tls._handshake", _make_tls_handshake(days_left=90)
-    )
+    return _patch_handshake(monkeypatch, days_left=90)
 
 
 @pytest.fixture
 def mock_tls_warn(monkeypatch):
-    monkeypatch.setattr(
-        "infra_check.checks.tls._handshake", _make_tls_handshake(days_left=15)
-    )
+    return _patch_handshake(monkeypatch, days_left=15)
 
 
 @pytest.fixture
@@ -88,24 +111,41 @@ def mock_tcp_fail(monkeypatch):
     monkeypatch.setattr(socket, "create_connection", _fail)
 
 
-def make_http_client(status_code=200, reason="OK", final_url="https://example.com/", history=None):
-    """Build an httpx.Client substitute with a canned response."""
-    import httpx
+def make_http_client(
+    status_code=200,
+    reason="OK",
+    final_url="https://example.com/",
+    history=None,
+    delay=0.0,
+):
+    """Build an httpx.Client substitute with a canned streaming response."""
 
     class FakeResponse:
         pass
+
+    class FakeStream:
+        def __init__(self, resp):
+            self._resp = resp
+
+        def __enter__(self):
+            if delay:
+                time.sleep(delay)
+            return self._resp
+
+        def __exit__(self, *exc):
+            return False
 
     class FakeClient:
         def __init__(self, *a, **kw):
             pass
 
-        def get(self, url):
+        def stream(self, method, url):
             resp = FakeResponse()
             resp.status_code = status_code
             resp.reason_phrase = reason
-            resp.url = httpx.URL(final_url)
+            resp.url = final_url
             resp.history = history or []
-            return resp
+            return FakeStream(resp)
 
         def __enter__(self):
             return self
@@ -116,8 +156,33 @@ def make_http_client(status_code=200, reason="OK", final_url="https://example.co
     return FakeClient
 
 
+class _FakeURL:
+    """Minimal str-like url (streaming tests patch httpx.URL parsing away)."""
+
+
+def make_http_result(status_code=200, reason="OK", final_url="https://example.com/", history=None):
+    return make_http_client(status_code, reason, final_url, history)
+
+
 @pytest.fixture
 def mock_http_200(monkeypatch):
     monkeypatch.setattr(
-        "infra_check.checks.http.httpx.Client", make_http_client(status_code=200, reason="OK")
+        "infra_check.checks.http.httpx.Client",
+        make_http_client(status_code=200, reason="OK"),
+    )
+
+
+def healthy_http_patch(
+    monkeypatch,
+    final_url="https://example.com/",
+    history=None,
+    status_code=200,
+    reason="OK",
+):
+    """Patch the HTTP layer for a canned response (used by CLI tests)."""
+    monkeypatch.setattr(
+        "infra_check.checks.http.httpx.Client",
+        make_http_client(
+            status_code=status_code, reason=reason, final_url=final_url, history=history
+        ),
     )
